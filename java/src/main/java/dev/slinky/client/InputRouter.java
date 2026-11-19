@@ -54,10 +54,34 @@ public final class InputRouter implements InputQuery.Host {
    @Override
    public int dispatch(InputQuery.Request request, boolean unchanged) {
       Module candidate = this.modules.find("GUI");
-      return !(candidate instanceof GuiModule)
-         ? 0
-         : (int)((GuiModule)candidate)
-            .dispatchInput(request.type, request.key, request.requested == 1, unchanged ? 1 : 0, request.utf8, request.x, request.y, request.wheel);
+      if (!(candidate instanceof GuiModule)) {
+         return 0;
+      }
+
+      GuiModule gui = (GuiModule)candidate;
+
+      // If another mod/client owns the active screen, Slinky must not
+      // consume its mouse or keyboard events.
+      if (gui.isEnabled() && !gui.ownsActiveScreen()) {
+         return 0;
+      }
+
+      // When Slinky's GUI is closed, only listen for its own binding while
+      // Minecraft itself has focus. External GUIs keep full input ownership.
+      if (!gui.isEnabled() && !this.ready()) {
+         return 0;
+      }
+
+      return (int)gui.dispatchInput(
+         request.type,
+         request.key,
+         request.requested == 1,
+         unchanged ? 1 : 0,
+         request.utf8,
+         request.x,
+         request.y,
+         request.wheel
+      );
    }
 
    @Override
