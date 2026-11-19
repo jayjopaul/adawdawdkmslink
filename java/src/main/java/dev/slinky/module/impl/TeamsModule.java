@@ -121,12 +121,19 @@ public final class TeamsModule extends EvidenceModule {
 
          for (EntityPlayer player : context.world().playerEntities) {
             if (player != context.player()) {
-               char code = entityColor(player);
-               boolean member = this.flag("match_self_color") && code == owner;
-               int low = code & 255;
-               int index = ((byte)low >= 97 ? 169 : 208) + low & 0xFF;
-               if (!member && index < COLORS.length) {
-                  member = this.names("team_colors").contains(COLORS[index]);
+               // Prefer Minecraft's actual scoreboard/team relationship.
+               // Injected clients can alter display names/prefix rendering,
+               // which makes the old color-only heuristic unreliable.
+               boolean member = context.player().isOnSameTeam(player);
+
+               if (!member) {
+                  char code = entityColor(player);
+                  member = this.flag("match_self_color") && code == owner;
+                  int low = code & 255;
+                  int index = ((byte)low >= 97 ? 169 : 208) + low & 0xFF;
+                  if (!member && index < COLORS.length) {
+                     member = this.names("team_colors").contains(COLORS[index]);
+                  }
                }
 
                RelationshipService.set(player, 1, member);
