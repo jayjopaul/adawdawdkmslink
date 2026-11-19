@@ -38,3 +38,5 @@ jobs:
           path: build/mac/Slinky-Mac-1.8.9.jar
           if-no-files-found: error
 # interop rebuild
+
+# interop-v2 rebuild
