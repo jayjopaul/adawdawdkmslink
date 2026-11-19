@@ -408,26 +408,34 @@ public final class SlinkyPatches implements Opcodes {
             return 1;
          })
          .edit("rightClickMouse", "()V", "beforeInteraction(true)/afterInteraction(true)", -1, method -> interaction(method, true))
-         .edit("clickMouse", "()V", "beforeInteraction(false)/afterInteraction(false)", -1, method -> interaction(method, false))
-         .edit("runTick", "()V", "ClientTickEvent START/END", -1, method -> {
-            int returns = beforeReturns(method, () -> list(new InsnNode(3), hook("dev/slinky/client/ClientEventBridge", "clientTick", "(Z)V")));
-            method.instructions.insert(list(new InsnNode(4), hook("dev/slinky/client/ClientEventBridge", "clientTick", "(Z)V")));
-            return returns;
-         })
-         .edit("runGameLoop", "()V", "RenderTickEvent START/END around updateCameraAndRender", 1, method -> {
-            int count = 0;
+         .edit("clickMouse", "()V", "beforeInteraction(false)/afterInteraction(false)", -1, method -> interaction(method, false));
 
-            for (AbstractInsnNode insn : method.instructions.toArray()) {
-               if (isCall(insn, "net/minecraft/client/renderer/EntityRenderer", "updateCameraAndRender", "(FJ)V")) {
-                  method.instructions.insertBefore(insn, list(new InsnNode(4), hook("dev/slinky/client/ClientEventBridge", "renderTick", "(Z)V")));
-                  method.instructions.insert(insn, list(new InsnNode(3), hook("dev/slinky/client/ClientEventBridge", "renderTick", "(Z)V")));
-                  count++;
+      // Forge owns the stable tick lifecycle. Do not patch Minecraft's central
+      // tick/game-loop methods on Forge because a later injected client can
+      // redefine Minecraft and erase these hooks.
+      if (!forge) {
+         minecraft
+            .edit("runTick", "()V", "ClientTickEvent START/END", -1, method -> {
+               int returns = beforeReturns(method, () -> list(new InsnNode(3), hook("dev/slinky/client/ClientEventBridge", "clientTick", "(Z)V")));
+               method.instructions.insert(list(new InsnNode(4), hook("dev/slinky/client/ClientEventBridge", "clientTick", "(Z)V")));
+               return returns;
+            })
+            .edit("runGameLoop", "()V", "RenderTickEvent START/END around updateCameraAndRender", 1, method -> {
+               int count = 0;
+
+               for (AbstractInsnNode insn : method.instructions.toArray()) {
+                  if (isCall(insn, "net/minecraft/client/renderer/EntityRenderer", "updateCameraAndRender", "(FJ)V")) {
+                     method.instructions.insertBefore(insn, list(new InsnNode(4), hook("dev/slinky/client/ClientEventBridge", "renderTick", "(Z)V")));
+                     method.instructions.insert(insn, list(new InsnNode(3), hook("dev/slinky/client/ClientEventBridge", "renderTick", "(Z)V")));
+                     count++;
+                  }
                }
-            }
 
-            return count;
-         })
-         .edit(
+               return count;
+            });
+      }
+
+      minecraft.edit(
             "loadWorld",
             "(L" + worldClient + ";Ljava/lang/String;)V",
             "WorldEvent.Unload at head",
@@ -438,12 +446,14 @@ public final class SlinkyPatches implements Opcodes {
                return 1;
             }
          );
-      minecraft.everyMethodExpected = 2;
-      minecraft.everyMethodLabel = "Keyboard.next/Mouse.next event-loop redirects (runTick, or OptiFine runInputTick)";
-      minecraft.everyMethod
-         .add(method -> redirectInputLoop(method, "org/lwjgl/input/Keyboard", "next", "()Z", "dev/slinky/client/ClientEventBridge", "keyboardNext"));
-      minecraft.everyMethod
-         .add(method -> redirectInputLoop(method, "org/lwjgl/input/Mouse", "next", "()Z", "dev/slinky/client/ClientEventBridge", "mouseNext"));
+      if (!forge) {
+         minecraft.everyMethodExpected = 2;
+         minecraft.everyMethodLabel = "Keyboard.next/Mouse.next event-loop redirects (runTick, or OptiFine runInputTick)";
+         minecraft.everyMethod
+            .add(method -> redirectInputLoop(method, "org/lwjgl/input/Keyboard", "next", "()Z", "dev/slinky/client/ClientEventBridge", "keyboardNext"));
+         minecraft.everyMethod
+            .add(method -> redirectInputLoop(method, "org/lwjgl/input/Mouse", "next", "()Z", "dev/slinky/client/ClientEventBridge", "mouseNext"));
+      }
       patches.add(minecraft);
       patches.add(
          new SlinkyPatches.ClassEdits("net/minecraft/client/multiplayer/PlayerControllerMP")
