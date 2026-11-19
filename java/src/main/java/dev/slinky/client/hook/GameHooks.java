@@ -158,6 +158,12 @@ public final class GameHooks {
 
       if (start) {
          forgeWorldFallback = true;
+
+         // Refresh relationship/team flags before any combat module chooses a
+         // target. Teams normally updates from the ray/frame event family,
+         // which Grave may replace after injection.
+         modules.dispatch(new SemanticEvent(0));
+
          modules.dispatch(new SemanticEvent(16));
          beginMovement();
          modules.dispatch(new SemanticEvent(17));
