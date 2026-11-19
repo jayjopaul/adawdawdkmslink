@@ -5,7 +5,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
-import net.minecraft.client.Minecraft;
 
 public final class Platform {
    private static Platform.Namespace namespace = Platform.Namespace.NAMED;
@@ -33,7 +32,15 @@ public final class Platform {
    }
 
    public static ClassLoader getGameClassLoader() {
-      ClassLoader loader = Minecraft.class.getClassLoader();
+      // Never resolve net.minecraft.client.Minecraft during coremod startup.
+      // Doing so marks the target class as already loaded before late Mixin
+      // configs (Essential/PolyPatcher/Hytils/Meowtils/etc.) are prepared.
+      ClassLoader loader = Thread.currentThread().getContextClassLoader();
+      if (loader != null) {
+         return loader;
+      }
+
+      loader = Platform.class.getClassLoader();
       return loader != null ? loader : ClassLoader.getSystemClassLoader();
    }
 
