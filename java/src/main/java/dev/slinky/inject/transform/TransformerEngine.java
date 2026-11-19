@@ -6,7 +6,13 @@ import dev.slinky.shaded.asm.ClassReader;
 import dev.slinky.shaded.asm.ClassWriter;
 import dev.slinky.shaded.asm.tree.ClassNode;
 import dev.slinky.shaded.asm.tree.MethodNode;
+import java.io.InputStream;
+import java.util.ArrayDeque;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 public final class TransformerEngine {
    private int applied;
@@ -98,33 +104,123 @@ public final class TransformerEngine {
    }
 
    static final class GameClassWriter extends ClassWriter {
+      private final ClassLoader loader;
+      private final Map<String, TypeInfo> hierarchy = new HashMap<>();
+
       GameClassWriter(int flags) {
          super(flags);
+         this.loader = Platform.getGameClassLoader();
       }
 
       @Override
       protected String getCommonSuperClass(String first, String second) {
-         ClassLoader loader = Platform.getGameClassLoader();
+         if (first.equals(second)) {
+            return first;
+         }
 
          try {
-            Class<?> a = Class.forName(first.replace('/', '.'), false, loader);
-            Class<?> b = Class.forName(second.replace('/', '.'), false, loader);
-            if (a.isAssignableFrom(b)) {
+            if (isAssignableFrom(first, second)) {
                return first;
-            } else if (b.isAssignableFrom(a)) {
+            }
+            if (isAssignableFrom(second, first)) {
                return second;
-            } else if (!a.isInterface() && !b.isInterface()) {
-               do {
-                  a = a.getSuperclass();
-               } while (!a.isAssignableFrom(b));
+            }
 
-               return a.getName().replace('.', '/');
-            } else {
+            TypeInfo firstInfo = info(first);
+            TypeInfo secondInfo = info(second);
+            if (firstInfo == null || secondInfo == null || firstInfo.isInterface || secondInfo.isInterface) {
                return "java/lang/Object";
             }
-         } catch (Throwable var6) {
-            return "java/lang/Object";
+
+            String candidate = firstInfo.superName;
+            while (candidate != null) {
+               if (isAssignableFrom(candidate, second)) {
+                  return candidate;
+               }
+               TypeInfo next = info(candidate);
+               candidate = next == null ? null : next.superName;
+            }
+         } catch (Throwable ignored) {
+         }
+
+         return "java/lang/Object";
+      }
+
+      private boolean isAssignableFrom(String target, String source) {
+         if (target.equals(source) || "java/lang/Object".equals(target)) {
+            return true;
+         }
+
+         Set<String> visited = new HashSet<>();
+         ArrayDeque<String> queue = new ArrayDeque<>();
+         queue.add(source);
+
+         while (!queue.isEmpty()) {
+            String current = queue.removeFirst();
+            if (!visited.add(current)) {
+               continue;
+            }
+            if (target.equals(current)) {
+               return true;
+            }
+
+            TypeInfo type = info(current);
+            if (type == null) {
+               continue;
+            }
+            if (type.superName != null) {
+               queue.addLast(type.superName);
+            }
+            for (String iface : type.interfaces) {
+               queue.addLast(iface);
+            }
+         }
+
+         return false;
+      }
+
+      private TypeInfo info(String internalName) {
+         if (hierarchy.containsKey(internalName)) {
+            return hierarchy.get(internalName);
+         }
+
+         TypeInfo result = null;
+         InputStream stream = null;
+         try {
+            stream = loader.getResourceAsStream(internalName + ".class");
+            if (stream != null) {
+               ClassReader reader = new ClassReader(stream);
+               result = new TypeInfo(
+                  reader.getSuperName(),
+                  reader.getInterfaces(),
+                  (reader.getAccess() & 0x0200) != 0
+               );
+            }
+         } catch (Throwable ignored) {
+         } finally {
+            if (stream != null) {
+               try {
+                  stream.close();
+               } catch (Throwable ignored) {
+               }
+            }
+         }
+
+         hierarchy.put(internalName, result);
+         return result;
+      }
+
+      private static final class TypeInfo {
+         final String superName;
+         final String[] interfaces;
+         final boolean isInterface;
+
+         TypeInfo(String superName, String[] interfaces, boolean isInterface) {
+            this.superName = superName;
+            this.interfaces = interfaces == null ? new String[0] : interfaces;
+            this.isInterface = isInterface;
          }
       }
    }
+
 }
