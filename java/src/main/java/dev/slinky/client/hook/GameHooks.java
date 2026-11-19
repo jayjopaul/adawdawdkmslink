@@ -106,6 +106,18 @@ public final class GameHooks {
       }
    }
 
+   public static void forgeCombatTick() {
+      if (modules != null && modules.context().ready()) {
+         // Aim Assist normally refreshes on the World.updateEntities hook.
+         // Grave can redefine Minecraft/render classes after startup, so give
+         // combat modules a stable Forge-driven target refresh as well.
+         modules.dispatch(new SemanticEvent(18));
+         beginTick();
+      } else {
+         combat.reset();
+      }
+   }
+
    public static EntityPlayer target() {
       return combat.target();
    }
