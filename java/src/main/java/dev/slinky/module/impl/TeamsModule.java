@@ -105,6 +105,10 @@ public final class TeamsModule extends EvidenceModule {
 
    @Override
    public void onEvent(ClientContext context, SemanticEvent event) {
+      this.refresh(context);
+   }
+
+   public void refresh(ClientContext context) {
       if (context.ready()) {
          char owner = entityColor(context.player());
          NetworkPlayerInfo info = context.minecraft().getNetHandler().getPlayerInfo(context.player().getUniqueID());
@@ -121,9 +125,6 @@ public final class TeamsModule extends EvidenceModule {
 
          for (EntityPlayer player : context.world().playerEntities) {
             if (player != context.player()) {
-               // Prefer Minecraft's actual scoreboard/team relationship.
-               // Injected clients can alter display names/prefix rendering,
-               // which makes the old color-only heuristic unreliable.
                boolean member = context.player().isOnSameTeam(player);
 
                if (!member) {
