@@ -54,6 +54,17 @@ public final class GuiModule extends EvidenceModule {
       return this.runtime.closeRequested;
    }
 
+   public boolean ownsActiveScreen() {
+      return this.manager.context().minecraft() != null
+         && ownsScreen(this.manager.context().minecraft().currentScreen);
+   }
+
+   private static boolean ownsScreen(GuiScreen screen) {
+      return screen instanceof RecoveredGuiScreen
+         || screen instanceof GuiModuleList
+         || screen instanceof GuiModuleSettings;
+   }
+
    public int redrawFlags(int old) {
       return old | 3;
    }
@@ -66,14 +77,23 @@ public final class GuiModule extends EvidenceModule {
    @Override
    protected void onEnable(ClientContext c) {
       this.runtime.start(RenderAccess.now());
+      GuiScreen screen = c.minecraft().currentScreen;
+
+      // Never replace or steal input from a screen owned by another mod/client.
+      // If another UI is already active, immediately relinquish the GUI module.
+      if (screen != null && !ownsScreen(screen)) {
+         this.runtime.finishModal(true);
+         this.runtime.clearInteraction();
+         this.manager.requestEnabled(this, false);
+         return;
+      }
+
       if (Mouse.isGrabbed()) {
          Mouse.setCursorPosition(c.minecraft().displayWidth / 2, c.minecraft().displayHeight / 2);
          Mouse.setGrabbed(false);
       }
 
-      if (!(c.minecraft().currentScreen instanceof RecoveredGuiScreen)
-         && !(c.minecraft().currentScreen instanceof GuiModuleList)
-         && !(c.minecraft().currentScreen instanceof GuiModuleSettings)) {
+      if (!ownsScreen(screen)) {
          c.minecraft().displayGuiScreen(new RecoveredGuiScreen(this.manager, this));
       }
    }
@@ -83,11 +103,15 @@ public final class GuiModule extends EvidenceModule {
       this.runtime.finishModal(true);
       this.runtime.clearInteraction();
       GuiScreen screen = c.minecraft().currentScreen;
-      if (screen instanceof RecoveredGuiScreen || screen instanceof GuiModuleList || screen instanceof GuiModuleSettings) {
+      boolean owned = ownsScreen(screen);
+
+      if (owned) {
          c.minecraft().displayGuiScreen(null);
       }
 
-      if (c.ready() && !this.shutdown) {
+      // Only restore Minecraft focus when Slinky itself owned the screen.
+      // Another client may intentionally have the mouse ungrabbed.
+      if (owned && c.ready() && !this.shutdown) {
          c.minecraft().setIngameFocus();
       }
 
@@ -142,16 +166,27 @@ public final class GuiModule extends EvidenceModule {
    @Override
    public void onEvent(ClientContext c, SemanticEvent e) {
       RenderEventPayload payload = RenderEventPayload.get(e);
-      if (e.type == 9 && payload != null) {
+      boolean owns = ownsScreen(c.minecraft().currentScreen);
+
+      // If another client/mod replaces Slinky's screen, stop owning input
+      // instead of continuously fighting its mouse/focus state.
+      if (e.type == 0 && this.isEnabled() && !owns) {
+         this.runtime.finishModal(true);
+         this.runtime.clearInteraction();
+         this.manager.requestEnabled(this, false);
+         return;
+      }
+
+      if (e.type == 9 && payload != null && owns) {
          payload.redrawFlags = this.redrawFlags(payload.redrawFlags);
-      } else if (e.type == 10 && payload != null && payload.guiDraw != null) {
+      } else if (e.type == 10 && payload != null && payload.guiDraw != null && owns) {
          payload.guiDraw.run();
       } else if (e.type == 26) {
          this.shutdown = true;
          RenderAccess.releaseCanvasResources();
          this.runtime.finishModal(true);
          this.runtime.clearInteraction();
-      } else if (e.type == 0 && Mouse.isGrabbed()) {
+      } else if (e.type == 0 && owns && Mouse.isGrabbed()) {
          Mouse.setGrabbed(false);
       }
    }
