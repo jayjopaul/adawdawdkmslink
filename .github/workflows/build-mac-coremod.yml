@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - mac-coremod-port
+      - slinky-grave-interop
   workflow_dispatch:
   pull_request:
     branches:
