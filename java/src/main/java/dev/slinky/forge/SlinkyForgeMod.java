@@ -42,15 +42,20 @@ public final class SlinkyForgeMod {
    @SubscribeEvent
    public void onClientTick(TickEvent.ClientTickEvent event) {
       boolean start = event.phase == TickEvent.Phase.START;
+      GameHooks.forgeWorldTick(start);
       if (start) {
-         GameHooks.forgeCombatTick();
+         GameHooks.forgeControllerTick();
       }
       ClientEventBridge.clientTick(start);
    }
 
    @SubscribeEvent
    public void onRenderTick(TickEvent.RenderTickEvent event) {
-      ClientEventBridge.renderTick(event.phase == TickEvent.Phase.START);
+      boolean start = event.phase == TickEvent.Phase.START;
+      if (start) {
+         GameHooks.forgeFrameStart(event.renderTickTime);
+      }
+      ClientEventBridge.renderTick(start);
    }
 
    @SubscribeEvent
