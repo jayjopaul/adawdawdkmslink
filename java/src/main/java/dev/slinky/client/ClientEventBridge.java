@@ -74,6 +74,7 @@ public final class ClientEventBridge {
          bridge.modules.renderTick(start);
          if (!start) {
             GameHooks.afterFrameRender();
+            GameHooks.beforeDisplay();
          }
       }
    }
