@@ -11,6 +11,7 @@ import dev.slinky.module.Module;
 import dev.slinky.module.ModuleManager;
 import dev.slinky.module.impl.NoHurtCamModule;
 import dev.slinky.module.impl.SafeWalkModule;
+import dev.slinky.module.impl.TeamsModule;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.entity.EntityPlayerSP;
 import net.minecraft.entity.Entity;
@@ -160,9 +161,11 @@ public final class GameHooks {
          forgeWorldFallback = true;
 
          // Refresh relationship/team flags before any combat module chooses a
-         // target. Teams normally updates from the ray/frame event family,
-         // which Grave may replace after injection.
-         modules.dispatch(new SemanticEvent(0));
+         // target without double-running the rest of the frame-event modules.
+         Module teams = modules.find("teams");
+         if (teams instanceof TeamsModule && teams.isEnabled()) {
+            ((TeamsModule)teams).refresh(modules.context());
+         }
 
          modules.dispatch(new SemanticEvent(16));
          beginMovement();
