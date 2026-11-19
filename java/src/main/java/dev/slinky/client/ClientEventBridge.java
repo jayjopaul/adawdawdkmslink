@@ -222,7 +222,8 @@ public final class ClientEventBridge {
    private void attachPipeline() {
       NetHandlerPlayClient handler = Minecraft.getMinecraft().getNetHandler();
       final Channel channel = handler == null ? null : channel(handler.getNetworkManager());
-      if (channel != null && channel != this.attachedChannel && channel.isOpen()) {
+      boolean missing = channel != null && channel.pipeline().get("slinky_semantic_packets") == null;
+      if (channel != null && channel.isOpen() && (channel != this.attachedChannel || missing)) {
          this.attachedChannel = channel;
          channel.eventLoop().execute(new Runnable() {
             @Override
