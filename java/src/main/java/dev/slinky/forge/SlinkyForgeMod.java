@@ -2,6 +2,7 @@ package dev.slinky.forge;
 
 import dev.slinky.SlinkyMod;
 import dev.slinky.client.ClientEventBridge;
+import dev.slinky.client.hook.GameHooks;
 import dev.slinky.inject.Platform;
 import dev.slinky.inject.SlinkyCorePlugin;
 import net.minecraftforge.fml.common.FMLCommonHandler;
@@ -40,7 +41,11 @@ public final class SlinkyForgeMod {
 
    @SubscribeEvent
    public void onClientTick(TickEvent.ClientTickEvent event) {
-      ClientEventBridge.clientTick(event.phase == TickEvent.Phase.START);
+      boolean start = event.phase == TickEvent.Phase.START;
+      if (start) {
+         GameHooks.forgeCombatTick();
+      }
+      ClientEventBridge.clientTick(start);
    }
 
    @SubscribeEvent
