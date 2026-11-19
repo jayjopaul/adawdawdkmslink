@@ -80,14 +80,17 @@ public final class ClientEventBridge {
 
    public static boolean keyboardNext() {
       ClientEventBridge bridge = instance;
+      boolean own = bridge != null && bridge.ownsGlobalInput();
       if (bridge != null && bridge.keyPending) {
          bridge.keyPending = false;
-         bridge.onKeyInput();
+         if (own) {
+            bridge.onKeyInput();
+         }
       }
 
       boolean next = Keyboard.next();
       if (bridge != null) {
-         bridge.keyPending = next;
+         bridge.keyPending = next && own;
       }
 
       return next;
@@ -95,22 +98,47 @@ public final class ClientEventBridge {
 
    public static boolean mouseNext() {
       ClientEventBridge bridge = instance;
+      boolean own = bridge != null && bridge.ownsGlobalInput();
       if (bridge != null && bridge.mousePending) {
          bridge.mousePending = false;
-         ForgeInputAdapter.mouse(bridge.modules);
+         if (own) {
+            ForgeInputAdapter.mouse(bridge.modules);
+         }
       }
 
       boolean next = Mouse.next();
 
-      while (next && bridge != null && bridge.swallowMouseEvent()) {
+      while (next && own && bridge != null && bridge.swallowMouseEvent()) {
          next = Mouse.next();
       }
 
       if (bridge != null) {
-         bridge.mousePending = next;
+         bridge.mousePending = next && own;
       }
 
       return next;
+   }
+
+   public static void forgeKeyInput() {
+      ClientEventBridge bridge = instance;
+      if (bridge != null && bridge.ownsGlobalInput()) {
+         bridge.onKeyInput();
+      }
+   }
+
+   public static void forgeMouseInput() {
+      ClientEventBridge bridge = instance;
+      if (bridge != null && bridge.ownsGlobalInput()) {
+         ForgeInputAdapter.mouse(bridge.modules);
+      }
+   }
+
+   private boolean ownsGlobalInput() {
+      Minecraft minecraft = Minecraft.getMinecraft();
+      return minecraft != null
+         && minecraft.currentScreen == null
+         && minecraft.inGameHasFocus
+         && (!Mouse.isCreated() || Mouse.isGrabbed());
    }
 
    private boolean swallowMouseEvent() {
@@ -155,15 +183,15 @@ public final class ClientEventBridge {
    }
 
    private boolean screenKeyInput(GuiScreen screen) {
-      if (GuiMenuCommand.handle(screen, Keyboard.getEventKey(), Keyboard.getEventKeyState(), this.modules)) {
-         return true;
-      } else {
-         return isConfigurationScreen(screen) ? false : (ForgeInputAdapter.keyboard(this.modules) & 0xFF) != 0;
-      }
+      // Keep !gui support in chat, but otherwise never consume input belonging
+      // to vanilla/Grave/other mod screens.
+      return GuiMenuCommand.handle(screen, Keyboard.getEventKey(), Keyboard.getEventKeyState(), this.modules);
    }
 
    private boolean screenMouseInput(GuiScreen screen) {
-      return isConfigurationScreen(screen) ? false : (ForgeInputAdapter.mouse(this.modules) & 0xFF) != 0;
+      // Slinky's own screens override their input handlers. All other screens
+      // must remain completely pass-through for client interoperability.
+      return false;
    }
 
    private static boolean isConfigurationScreen(GuiScreen screen) {
