@@ -27,6 +27,11 @@ public final class GameHooks {
    private static final TargetCombatStatus combat = new TargetCombatStatus();
    private static boolean uiDrawn;
    private static boolean baseSwing;
+   private static long rayHookHeartbeat;
+   private static long worldHookHeartbeat;
+   private static long controllerHookHeartbeat;
+   private static boolean forgeWorldFallback;
+   private static final long HOOK_STALE_NANOS = 150000000L;
 
    private GameHooks() {
    }
@@ -106,15 +111,73 @@ public final class GameHooks {
       }
    }
 
-   public static void forgeCombatTick() {
-      if (modules != null && modules.context().ready()) {
-         // Aim Assist normally refreshes on the World.updateEntities hook.
-         // Grave can redefine Minecraft/render classes after startup, so give
-         // combat modules a stable Forge-driven target refresh as well.
+   public static void forgeFrameStart(float partialTicks) {
+      if (modules == null || !modules.context().ready()) {
+         return;
+      }
+
+      long now = System.nanoTime();
+      if (now - rayHookHeartbeat <= HOOK_STALE_NANOS) {
+         return;
+      }
+
+      // EntityRenderer#getMouseOver was replaced after Slinky transformed it.
+      // Recreate the frame/raycast event family from Forge instead.
+      ray = null;
+      RotationService.beginFrame(modules.context(), 0.0, partialTicks);
+      beginTick();
+      modules.dispatch(new SemanticEvent(0));
+
+      if (modules.context().minecraft().inGameHasFocus) {
+         ray = new SemanticEvent(8);
+         ray.distance = 3.0;
+         modules.dispatch(ray);
+
+         // Reach/Hitboxes normally modify vanilla getMouseOver in-place.
+         // When that hook is gone, run the recovered ray query directly.
+         if (ray.queryOverride || ray.enabled || ray.expand != 0.0) {
+            ray.queryOverride = true;
+            RayQueryAdapter.update(modules, ray);
+         }
+      }
+
+      PlacementSelection.frameReset();
+   }
+
+   public static void forgeWorldTick(boolean start) {
+      if (modules == null || !modules.context().ready()) {
+         forgeWorldFallback = false;
+         return;
+      }
+
+      long now = System.nanoTime();
+      if (now - worldHookHeartbeat <= HOOK_STALE_NANOS) {
+         forgeWorldFallback = false;
+         return;
+      }
+
+      if (start) {
+         forgeWorldFallback = true;
+         modules.dispatch(new SemanticEvent(16));
+         beginMovement();
+         modules.dispatch(new SemanticEvent(17));
+      } else if (forgeWorldFallback) {
+         forgeWorldFallback = false;
          modules.dispatch(new SemanticEvent(18));
-         beginTick();
-      } else {
-         combat.reset();
+
+         SemanticEvent event = new SemanticEvent(13);
+         event.active = false;
+         event.yaw = RotationService.storedRotationValid() ? RotationService.cameraYaw() : modules.context().player().rotationYaw;
+         event.pitch = RotationService.storedRotationValid() ? RotationService.cameraPitch() : modules.context().player().rotationPitch;
+         modules.dispatch(event);
+         RotationService.finishFrame(modules.context(), event);
+         RotationService.applyPending(modules.context(), true);
+      }
+   }
+
+   public static void forgeControllerTick() {
+      if (modules != null && System.nanoTime() - controllerHookHeartbeat > HOOK_STALE_NANOS) {
+         updateControllerFallback();
       }
    }
 
@@ -128,6 +191,7 @@ public final class GameHooks {
 
    public static void beforeEntities(World world) {
       if (modules != null && world == modules.context().world()) {
+         worldHookHeartbeat = System.nanoTime();
          modules.dispatch(new SemanticEvent(16));
          beginMovement();
          modules.dispatch(new SemanticEvent(17));
@@ -136,6 +200,7 @@ public final class GameHooks {
 
    public static void afterEntities(World world) {
       if (modules != null && world == modules.context().world()) {
+         worldHookHeartbeat = System.nanoTime();
          modules.dispatch(new SemanticEvent(18));
          if (!modules.context().ready()) {
             endMovement();
@@ -194,6 +259,7 @@ public final class GameHooks {
    }
 
    public static void beginRay(float partialTicks) {
+      rayHookHeartbeat = System.nanoTime();
       ray = null;
       if (modules != null && modules.context().ready()) {
          RotationService.beginFrame(modules.context(), 0.0, partialTicks);
@@ -314,6 +380,10 @@ public final class GameHooks {
       ray = null;
       combat.clear();
       previousDisplaySeconds = 0.0;
+      rayHookHeartbeat = 0L;
+      worldHookHeartbeat = 0L;
+      controllerHookHeartbeat = 0L;
+      forgeWorldFallback = false;
       try {
          RenderHooks.clear();
       } finally {
@@ -350,6 +420,11 @@ public final class GameHooks {
    }
 
    public static void updateController() {
+      controllerHookHeartbeat = System.nanoTime();
+      updateControllerFallback();
+   }
+
+   private static void updateControllerFallback() {
       if (modules != null) {
          SemanticEvent event = new SemanticEvent(25);
          modules.dispatch(event);
