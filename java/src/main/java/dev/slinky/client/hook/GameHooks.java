@@ -31,6 +31,7 @@ public final class GameHooks {
    private static long rayHookHeartbeat;
    private static long worldHookHeartbeat;
    private static long controllerHookHeartbeat;
+   private static long displayHookHeartbeat;
    private static boolean forgeWorldFallback;
    private static final long HOOK_STALE_NANOS = 150000000L;
 
@@ -290,6 +291,7 @@ public final class GameHooks {
    }
 
    public static strictfp void beforeDisplay() {
+      displayHookHeartbeat = System.nanoTime();
       if (modules != null) {
          if (!uiDrawn) {
             RenderHooks.beforeDisplay();
@@ -298,6 +300,12 @@ public final class GameHooks {
          uiDrawn = false;
          modules.applyPendingChanges();
          beforeDisplay((double)System.nanoTime() / 1.0E9);
+      }
+   }
+
+   public static void forgeBeforeDisplay() {
+      if (modules != null && System.nanoTime() - displayHookHeartbeat > HOOK_STALE_NANOS) {
+         beforeDisplay();
       }
    }
 
@@ -392,6 +400,7 @@ public final class GameHooks {
       rayHookHeartbeat = 0L;
       worldHookHeartbeat = 0L;
       controllerHookHeartbeat = 0L;
+      displayHookHeartbeat = 0L;
       forgeWorldFallback = false;
       try {
          RenderHooks.clear();
