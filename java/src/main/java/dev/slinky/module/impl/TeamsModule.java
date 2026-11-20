@@ -8,6 +8,7 @@ import dev.slinky.module.ModuleCategory;
 import net.minecraft.client.network.NetworkPlayerInfo;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.player.EntityPlayer;
+import net.minecraft.scoreboard.Team;
 import net.minecraft.util.ChatComponentText;
 import net.minecraft.util.IChatComponent;
 
@@ -108,36 +109,55 @@ public final class TeamsModule extends EvidenceModule {
       this.refresh(context);
    }
 
+   public boolean isTeammate(ClientContext context, EntityPlayer player) {
+      if (!this.isEnabled() || context == null || !context.ready() || player == null || player == context.player()) {
+         return false;
+      }
+
+      if (context.player().isOnSameTeam(player)) {
+         return true;
+      }
+
+      NetworkPlayerInfo selfInfo = context.minecraft().getNetHandler().getPlayerInfo(context.player().getUniqueID());
+      NetworkPlayerInfo playerInfo = context.minecraft().getNetHandler().getPlayerInfo(player.getUniqueID());
+      if (selfInfo != null && playerInfo != null) {
+         Team selfTeam = selfInfo.getPlayerTeam();
+         Team otherTeam = playerInfo.getPlayerTeam();
+         if (selfTeam != null && otherTeam != null
+            && (selfTeam == otherTeam
+               || selfTeam.isSameTeam(otherTeam)
+               || selfTeam.getRegisteredName().equals(otherTeam.getRegisteredName()))) {
+            return true;
+         }
+      }
+
+      char owner = entityColor(context.player());
+      if (selfInfo != null) {
+         if (selfInfo.getPlayerTeam() != null) {
+            owner = prefixColor(selfInfo.getPlayerTeam().getColorPrefix());
+            if (owner == 0) {
+               owner = 'r';
+            }
+         } else if (selfInfo.getDisplayName() instanceof ChatComponentText) {
+            owner = trailingColor(((ChatComponentText)selfInfo.getDisplayName()).getChatComponentText_TextValue());
+         }
+      }
+
+      char code = entityColor(player);
+      boolean member = this.flag("match_self_color") && code == owner;
+      int low = code & 255;
+      int index = ((byte)low >= 97 ? 169 : 208) + low & 0xFF;
+      if (!member && index < COLORS.length) {
+         member = this.names("team_colors").contains(COLORS[index]);
+      }
+      return member;
+   }
+
    public void refresh(ClientContext context) {
       if (context.ready()) {
-         char owner = entityColor(context.player());
-         NetworkPlayerInfo info = context.minecraft().getNetHandler().getPlayerInfo(context.player().getUniqueID());
-         if (info != null) {
-            if (info.getPlayerTeam() != null) {
-               owner = prefixColor(info.getPlayerTeam().getColorPrefix());
-               if (owner == 0) {
-                  owner = 'r';
-               }
-            } else if (info.getDisplayName() instanceof ChatComponentText) {
-               owner = trailingColor(((ChatComponentText)info.getDisplayName()).getChatComponentText_TextValue());
-            }
-         }
-
          for (EntityPlayer player : context.world().playerEntities) {
             if (player != context.player()) {
-               boolean member = context.player().isOnSameTeam(player);
-
-               if (!member) {
-                  char code = entityColor(player);
-                  member = this.flag("match_self_color") && code == owner;
-                  int low = code & 255;
-                  int index = ((byte)low >= 97 ? 169 : 208) + low & 0xFF;
-                  if (!member && index < COLORS.length) {
-                     member = this.names("team_colors").contains(COLORS[index]);
-                  }
-               }
-
-               RelationshipService.set(player, 1, member);
+               RelationshipService.set(player, 1, this.isTeammate(context, player));
             }
          }
       }
