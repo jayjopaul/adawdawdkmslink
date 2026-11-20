@@ -36,7 +36,7 @@ public final class ClientEventBridge {
    private static Field channelField;
    private static volatile long clientTickHeartbeat;
    private static volatile long renderTickHeartbeat;
-   private static final long HOOK_STALE_NANOS = 150000000L;
+   private static final long HOOK_STALE_NANOS = 1000000000L;
 
    public ClientEventBridge(ModuleManager modules, KeyBinding openGui, CommandBase command) {
       this.modules = modules;
