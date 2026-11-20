@@ -16,9 +16,12 @@ import java.util.concurrent.atomic.AtomicInteger;
 import net.minecraft.client.settings.KeyBinding;
 import net.minecraft.entity.EntityLivingBase;
 import net.minecraft.entity.player.EntityPlayer;
+import net.minecraft.network.play.client.C02PacketUseEntity;
 import org.lwjgl.input.Mouse;
 
 public final class AutoBlockModule extends EvidenceModule {
+   private static final int RECENT_ATTACK_TICKS = 3;
+   private static final int SLOT_SWAP_GRACE_TICKS = 2;
    private static final Field LAST_ATTACKER_TIME = ReflectionHelper.findField(
       EntityLivingBase.class,
       "lastAttackerTime",
@@ -35,6 +38,9 @@ public final class AutoBlockModule extends EvidenceModule {
    private boolean wroteAnimation;
    private boolean suppressUse;
    private final AtomicInteger lag = new AtomicInteger();
+   private final AtomicInteger recentAttackTicks = new AtomicInteger();
+   private int lastBlockableSlot = -1;
+   private int swapGraceTicks;
    private boolean blocking;
    private boolean overrideKey;
    private int animationRemaining = 72000;
@@ -123,15 +129,24 @@ public final class AutoBlockModule extends EvidenceModule {
    @Override
    public void onEvent(ClientContext c, SemanticEvent e) {
       if (e.type == 3) {
+         // The pipeline also classifies queued packets when checking for release.
+         if (e.packetAgeMillis == 0L && e.packet instanceof C02PacketUseEntity
+            && ((C02PacketUseEntity)e.packet).getAction() == C02PacketUseEntity.Action.ATTACK) {
+            this.recentAttackTicks.set(RECENT_ATTACK_TICKS);
+         }
          if (this.lag.get() != 0) {
             e.dispatchMode = 1;
          }
       } else if (e.type == 14) {
-         // CLICK_PRE for right click. Match Slate's suppress-use behavior:
-         // only cancel vanilla use when RMB is the configured activation
-         // condition and AutoBlock itself is not currently holding the block.
-         if (!e.active) {
-            if (!holdingSword(c)) {
+         if (e.active) {
+            this.recentAttackTicks.set(RECENT_ATTACK_TICKS);
+         } else if (!holdingSword(c) && this.overrideKey && this.blocking && c.player() != null) {
+            // A slot change can occur after tick START, with synthetic use already queued.
+            e.cancelled = true;
+            this.beginSlotSwap(c, this.recentAttackTicks.get() > 0);
+            this.releaseSwappedUseKey(c);
+         } else {
+            if (!holdingSword(c) && this.swapGraceTicks == 0) {
                this.lag.set(0);
             }
 
@@ -155,7 +170,25 @@ public final class AutoBlockModule extends EvidenceModule {
       return this.isEnabled() && (this.blocking || this.lag.get() != 0);
    }
 
+   private void beginSlotSwap(ClientContext c, boolean recentAttack) {
+      if (recentAttack && this.lastBlockableSlot >= 0
+         && c.player().inventory.currentItem != this.lastBlockableSlot) {
+         this.swapGraceTicks = SLOT_SWAP_GRACE_TICKS;
+      }
+   }
+
+   private void releaseSwappedUseKey(ClientContext c) {
+      KeyBinding key = useKey(c);
+      // Drop pending synthetic presses as well as the held override.
+      if (ActionAccess.presses(key) > 0) {
+         key.isPressed();
+      }
+      KeyState.restore(key);
+      this.overrideKey = false;
+   }
+
    private void updateAutoBlock(ClientContext c) {
+      boolean recentAttack = this.recentAttackTicks.getAndUpdate(ticks -> Math.max(0, ticks - 1)) > 0;
       this.fakeAnimation = false;
 
       if (this.wroteAnimation) {
@@ -170,6 +203,8 @@ public final class AutoBlockModule extends EvidenceModule {
       }
 
       if (!focused(c)) {
+         this.swapGraceTicks = 0;
+         this.lastBlockableSlot = -1;
          if (this.overrideKey && c.minecraft() != null && c.minecraft().gameSettings != null) {
             KeyState.restore(useKey(c));
             this.overrideKey = false;
@@ -184,13 +219,35 @@ public final class AutoBlockModule extends EvidenceModule {
       boolean sword = holdingSword(c);
       this.suppressUse = false;
 
+      boolean suspendBlock = false;
+      if (sword) {
+         if (this.swapGraceTicks > 0 && c.player().inventory.currentItem != this.lastBlockableSlot) {
+            this.blocking = false;
+         }
+         this.lastBlockableSlot = c.player().inventory.currentItem;
+         this.swapGraceTicks = 0;
+      } else {
+         if (this.blocking && this.overrideKey) {
+            this.beginSlotSwap(c, recentAttack || this.recentAttackTicks.get() > 0);
+            this.releaseSwappedUseKey(c);
+         }
+         suspendBlock = this.swapGraceTicks > 0;
+         if (suspendBlock) {
+            --this.swapGraceTicks;
+         } else {
+            this.lastBlockableSlot = -1;
+         }
+      }
+
       boolean animationEligible = false;
       boolean keyOwnedThisTick = false;
       boolean invalid = false;
 
       if (!sword) {
          invalid = this.overrideKey;
-      } else if (this.flag("require_left_mouse_pressed") && !Mouse.isButtonDown(0) || this.timerRangeBlocksUse()) {
+      } else if ((this.flag("require_left_mouse_pressed") && !Mouse.isButtonDown(0)
+         && !c.minecraft().gameSettings.keyBindAttack.isKeyDown()
+         && !recentAttack && this.recentAttackTicks.get() == 0) || this.timerRangeBlocksUse()) {
          invalid = true;
       } else {
          this.suppressUse = this.flag("require_right_mouse_pressed");
@@ -264,6 +321,10 @@ public final class AutoBlockModule extends EvidenceModule {
          }
       }
 
+      if (suspendBlock) {
+         return;
+      }
+
       if (this.blocking) {
          int held = ++this.heldTicks;
          int maximum = this.randomizedInt(this.number("max_hold_time"));
@@ -272,8 +333,10 @@ public final class AutoBlockModule extends EvidenceModule {
             return;
          }
 
-         KeyState.set(useKey(c), false);
-         this.overrideKey = true;
+         if (sword) {
+            KeyState.set(useKey(c), false);
+            this.overrideKey = true;
+         }
 
          if (this.random.chance(this.number("lag_chance"))) {
             this.lag.set(this.randomizedInt(this.number("lag_duration")));
@@ -330,6 +393,9 @@ public final class AutoBlockModule extends EvidenceModule {
       this.wroteAnimation = false;
       this.suppressUse = false;
       this.lag.set(0);
+      this.recentAttackTicks.set(0);
+      this.lastBlockableSlot = -1;
+      this.swapGraceTicks = 0;
       this.blocking = false;
       this.overrideKey = false;
       this.animationRemaining = 72000;
