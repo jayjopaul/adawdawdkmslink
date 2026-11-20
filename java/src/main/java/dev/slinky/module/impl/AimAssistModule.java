@@ -11,6 +11,7 @@ import dev.slinky.client.rotation.RotationService;
 import dev.slinky.inject.ReflectionHelper;
 import dev.slinky.module.EvidenceModule;
 import dev.slinky.module.ModuleCategory;
+import dev.slinky.module.ModuleManager;
 import java.lang.reflect.Field;
 import net.minecraft.client.entity.EntityOtherPlayerMP;
 import net.minecraft.entity.player.EntityPlayer;
@@ -22,6 +23,7 @@ import org.lwjgl.input.Mouse;
 
 public final strictfp class AimAssistModule extends EvidenceModule {
    private final WeaponsModule weapons;
+   private final ModuleManager modules;
    private final RecoveredRandom random;
    private final RecoveredRandom.Smooth pitchDamping = new RecoveredRandom.Smooth();
    private final RecoveredRandom.Smooth pitchNoise = new RecoveredRandom.Smooth();
@@ -37,11 +39,20 @@ public final strictfp class AimAssistModule extends EvidenceModule {
    private long tieCounter;
 
    public AimAssistModule(WeaponsModule weapons) {
-      this(weapons, RecoveredRandom.SHARED);
+      this(null, weapons, RecoveredRandom.SHARED);
    }
 
    public AimAssistModule(WeaponsModule weapons, RecoveredRandom random) {
+      this(null, weapons, random);
+   }
+
+   public AimAssistModule(ModuleManager modules, WeaponsModule weapons) {
+      this(modules, weapons, RecoveredRandom.SHARED);
+   }
+
+   public AimAssistModule(ModuleManager modules, WeaponsModule weapons, RecoveredRandom random) {
       super("aimassist", "Aim Assist", ModuleCategory.COMBAT);
+      this.modules = modules;
       this.weapons = weapons;
       this.random = random;
       this.reorderSettings(
@@ -140,6 +151,16 @@ public final strictfp class AimAssistModule extends EvidenceModule {
       return this.targetActive;
    }
 
+   private boolean directTeammate(ClientContext context, EntityPlayer candidate) {
+      if (this.modules != null) {
+         dev.slinky.module.Module teamModule = this.modules.find("teams");
+         if (teamModule instanceof TeamsModule && teamModule.isEnabled()) {
+            return ((TeamsModule)teamModule).isTeammate(context, candidate);
+         }
+      }
+      return (RelationshipService.flags(candidate) & 1) != 0;
+   }
+
    private strictfp boolean consider(
       ClientContext context, EntityPlayer candidate, Vec3 eye, float viewYaw, boolean locked, AimAssistModule.Score best, AimAssistModule.Candidate result
    ) {
@@ -147,7 +168,7 @@ public final strictfp class AimAssistModule extends EvidenceModule {
          return false;
       } else if (this.flag("ignore_invis") && candidate.isInvisibleToPlayer(context.player())) {
          return false;
-      } else if ((RelationshipService.flags(candidate) & 7) != 0) {
+      } else if ((RelationshipService.flags(candidate) & 6) != 0 || this.directTeammate(context, candidate)) {
          return false;
       } else {
          Vec3 position = new Vec3(candidate.posX, candidate.posY, candidate.posZ);
