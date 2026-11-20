@@ -11,6 +11,7 @@ import dev.slinky.client.rotation.RecoveredRandom;
 import dev.slinky.client.rotation.RotationMath;
 import dev.slinky.module.EvidenceModule;
 import dev.slinky.module.ModuleCategory;
+import java.util.concurrent.atomic.AtomicInteger;
 import net.minecraft.network.play.server.S08PacketPlayerPosLook;
 import net.minecraft.network.play.server.S12PacketEntityVelocity;
 import net.minecraft.network.play.server.S27PacketExplosion;
@@ -19,13 +20,14 @@ import net.minecraft.potion.Potion;
 public final strictfp class VelocityModule extends EvidenceModule {
    private final WeaponsModule weapons;
    private final RecoveredRandom.Smooth probability = new RecoveredRandom.Smooth();
-   private boolean resetPending;
-   private boolean knockbackPending;
-   private boolean storedPending;
-   private boolean attackApplied;
-   private boolean jumpOwned;
-   private int entityId;
-   private int countdown;
+   // Match OneClient Slate's cross-thread packet state exactly.
+   private volatile int skipRestore;
+   private int restoreAvailable;
+   private int attackReduced;
+   private int jumpOverridden;
+   private volatile int playerId;
+   private final AtomicInteger velocityReceived = new AtomicInteger();
+   private int reduceTicks;
    private double storedX;
    private double storedY;
    private double storedZ;
@@ -40,7 +42,7 @@ public final strictfp class VelocityModule extends EvidenceModule {
 
    @Override
    public strictfp boolean listens(int t) {
-      return t == 0 || t == 2 || t == 14 || t == 15 || t == 17 || t == 18;
+      return t == 0 || t == 2 || t == 5 || t == 14 || t == 15 || t == 17 || t == 18;
    }
 
    private strictfp boolean eligible(ClientContext c) {
@@ -64,17 +66,21 @@ public final strictfp class VelocityModule extends EvidenceModule {
       if (e.type == 2) {
          if (e.dispatchMode == 0) {
             if (e.packet instanceof S12PacketEntityVelocity) {
-               if (((S12PacketEntityVelocity)e.packet).getEntityID() == this.entityId) {
-                  this.knockbackPending = true;
+               if (((S12PacketEntityVelocity)e.packet).getEntityID() == this.playerId) {
+                  this.velocityReceived.getAndSet(1);
                }
             } else if (e.packet instanceof S27PacketExplosion) {
                S27PacketExplosion p = (S27PacketExplosion)e.packet;
                float x = p.func_149149_c();
                float z = p.func_149147_e();
-               this.knockbackPending = (double)(x * x + z * z) > 0.05;
+               this.velocityReceived.getAndSet((double)(x * x + z * z) > 0.05 ? 1 : 0);
             } else if (e.packet instanceof S08PacketPlayerPosLook) {
-               this.resetPending = true;
+               this.skipRestore = 1;
             }
+         }
+      } else if (e.type == 5) {
+         if (e.module == this) {
+            this.restoreAvailable = 0;
          }
       } else if (c.player() != null) {
          if (e.type == 14) {
@@ -84,7 +90,7 @@ public final strictfp class VelocityModule extends EvidenceModule {
                this.inputZ = c.player().motionZ;
             }
          } else if (e.type == 15) {
-            if (this.choice("mode") == 2 && (!this.attackApplied || this.flag("reduce_multiple_per_tick")) && e.active && e.reducing) {
+            if (this.choice("mode") == 2 && (this.attackReduced != 1 || this.flag("reduce_multiple_per_tick")) && e.active && e.reducing) {
                if ((!this.flag("require_forward") || !(0.0F >= c.player().moveForward)) && (!this.flag("require_weapon") || this.weapons.isWeapon(c.player()))) {
                   if (c.player().ticksExisted == c.player().getLastAttackerTime()) {
                      this.inputX *= 0.6;
@@ -92,7 +98,7 @@ public final strictfp class VelocityModule extends EvidenceModule {
                      c.player().motionX = this.inputX;
                      c.player().motionY = this.inputY;
                      c.player().motionZ = this.inputZ;
-                     this.attackApplied = true;
+                     this.attackReduced = 1;
                   }
                }
             }
@@ -100,30 +106,30 @@ public final strictfp class VelocityModule extends EvidenceModule {
             this.storedX = c.player().motionX;
             this.storedY = c.player().motionY;
             this.storedZ = c.player().motionZ;
-            this.storedPending = true;
+            this.restoreAvailable = 1;
          } else if (e.type == 0) {
             if (this.choice("mode") == 3 && c.inputReady()) {
-               if (this.resetPending) {
-                  this.resetPending = false;
-               } else if (this.storedPending && this.eligible(c) && this.chance(this.number("ignore_chance"))) {
+               if ((this.skipRestore & 1) != 0) {
+                  this.skipRestore = 0;
+               } else if (this.restoreAvailable == 1 && this.eligible(c) && this.chance(this.number("ignore_chance"))) {
                   c.player().motionX = this.storedX;
                   c.player().motionZ = this.storedZ;
                   if (this.choice("ignore_vertical") == 2 || this.choice("ignore_vertical") == 1 && !c.player().onGround) {
                      c.player().motionY = this.storedY;
                   }
 
-                  this.storedPending = false;
+                  this.restoreAvailable = 0;
                }
             }
          } else {
-            this.attackApplied = false;
+            this.attackReduced = 0;
             int mode = this.choice("mode");
             if (mode != 2 && c.inputReady()) {
-               this.entityId = c.player().getEntityId();
+               this.playerId = c.player().getEntityId();
                if (mode == 1) {
-                  if (this.jumpOwned) {
+                  if (this.jumpOverridden == 1) {
                      KeyState.restore(c.minecraft().gameSettings.keyBindJump);
-                     this.jumpOwned = false;
+                     this.jumpOverridden = 0;
                   } else if (this.eligible(c)
                      && this.chance(this.number("jump_chance"))
                      && (!this.flag("require_sprinting_jump") || c.player().isSprinting())
@@ -132,15 +138,14 @@ public final strictfp class VelocityModule extends EvidenceModule {
                      && !c.player().isPotionActive(Potion.jump)
                      && !c.minecraft().gameSettings.keyBindJump.isKeyDown()) {
                      KeyState.set(c.minecraft().gameSettings.keyBindJump, true);
-                     this.jumpOwned = true;
+                     this.jumpOverridden = 1;
                   }
                } else if (mode == 0) {
-                  if (this.countdown > 0) {
-                     if (--this.countdown == 0) {
+                  if (this.reduceTicks > 0) {
+                     if (--this.reduceTicks == 0) {
                         this.scale(c);
                      }
-                  } else if (this.knockbackPending) {
-                     this.knockbackPending = false;
+                  } else if (this.velocityReceived.compareAndSet(1, 0)) {
                      if (this.eligible(c) && this.chance(this.number("reduce_chance"))) {
                         double x = c.player().motionX;
                         double z = c.player().motionZ;
@@ -149,8 +154,8 @@ public final strictfp class VelocityModule extends EvidenceModule {
                            float angle = (float)((double)c.player().rotationYaw * -Math.PI / 180.0 + -Math.PI);
                            double projection = ((double)RotationMath.sine(angle) * x + (double)RotationMath.cosine(angle) * z) / length;
                            if ((double)this.number("fov") >= StrictMath.acos(projection)) {
-                              this.countdown = RecoveredMath.truncateInt(this.number("reduce_delay"));
-                              if (this.countdown <= 0 || --this.countdown == 0) {
+                              this.reduceTicks = RecoveredMath.truncateInt(this.number("reduce_delay"));
+                              if (this.reduceTicks <= 0 || --this.reduceTicks == 0) {
                                  this.scale(c);
                               }
                            }
@@ -171,15 +176,15 @@ public final strictfp class VelocityModule extends EvidenceModule {
 
    @Override
    protected strictfp synchronized void onEnable(ClientContext c) {
-      this.storedPending = false;
+      this.restoreAvailable = 0;
    }
 
    @Override
    protected strictfp synchronized void onDisable(ClientContext c) {
-      this.storedPending = false;
-      if (this.jumpOwned) {
+      this.restoreAvailable = false;
+      if (this.jumpOverridden) {
          KeyState.restore(c.minecraft().gameSettings.keyBindJump);
-         this.jumpOwned = false;
+         this.jumpOverridden = false;
       }
    }
 
@@ -189,12 +194,16 @@ public final strictfp class VelocityModule extends EvidenceModule {
    }
 
    private strictfp void reset(ClientContext c) {
-      if (this.jumpOwned) {
+      if (this.jumpOverridden) {
          KeyState.restore(c.minecraft().gameSettings.keyBindJump);
       }
 
-      this.jumpOwned = this.resetPending = this.knockbackPending = this.storedPending = this.attackApplied = false;
-      this.countdown = this.entityId = 0;
+      this.jumpOverridden = 0;
+      this.skipRestore = 0;
+      this.velocityReceived.set(0);
+      this.restoreAvailable = 0;
+      this.attackReduced = 0;
+      this.reduceTicks = this.playerId = 0;
       this.storedX = this.storedY = this.storedZ = this.inputX = this.inputY = this.inputZ = 0.0;
    }
 
