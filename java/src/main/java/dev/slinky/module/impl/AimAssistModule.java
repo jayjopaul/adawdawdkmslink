@@ -1,6 +1,7 @@
 package dev.slinky.module.impl;
 
 import dev.slinky.client.ClientContext;
+import dev.slinky.client.KeyState;
 import dev.slinky.client.RelationshipService;
 import dev.slinky.client.SemanticEvent;
 import dev.slinky.client.StatusText;
@@ -13,15 +14,19 @@ import dev.slinky.module.EvidenceModule;
 import dev.slinky.module.ModuleCategory;
 import dev.slinky.module.ModuleManager;
 import java.lang.reflect.Field;
+import java.util.concurrent.atomic.AtomicInteger;
+import net.minecraft.client.settings.KeyBinding;
 import net.minecraft.client.entity.EntityOtherPlayerMP;
 import net.minecraft.entity.player.EntityPlayer;
+import net.minecraft.network.play.client.C02PacketUseEntity;
 import net.minecraft.util.AxisAlignedBB;
 import net.minecraft.util.MovingObjectPosition;
 import net.minecraft.util.Vec3;
 import net.minecraft.util.MovingObjectPosition.MovingObjectType;
-import org.lwjgl.input.Mouse;
 
 public final strictfp class AimAssistModule extends EvidenceModule {
+   private static final int RECENT_ATTACK_TICKS = 3;
+   private final AtomicInteger recentAttackTicks = new AtomicInteger();
    private final WeaponsModule weapons;
    private final ModuleManager modules;
    private final RecoveredRandom random;
@@ -103,12 +108,23 @@ public final strictfp class AimAssistModule extends EvidenceModule {
 
    @Override
    public strictfp boolean listens(int type) {
-      return type == 1 || type == 5 || type == 13 || type == 18;
+      return type == 1 || type == 3 || type == 5 || type == 13 || type == 14 || type == 18 || type == 26;
    }
 
    @Override
    public strictfp void onEvent(ClientContext context, SemanticEvent event) {
-      if (event.type == 5) {
+      if (event.type == 3) {
+         if (event.packetAgeMillis == 0L && event.packet instanceof C02PacketUseEntity
+            && ((C02PacketUseEntity)event.packet).getAction() == C02PacketUseEntity.Action.ATTACK) {
+            this.recentAttackTicks.set(RECENT_ATTACK_TICKS);
+         }
+      } else if (event.type == 14) {
+         if (event.active) {
+            this.recentAttackTicks.set(RECENT_ATTACK_TICKS);
+         }
+      } else if (event.type == 26) {
+         this.recentAttackTicks.set(0);
+      } else if (event.type == 5) {
          // OneClient's toggle callback clears only the active target; it
          // deliberately leaves the secondary/silent rotation to settle.
          if (event.module == this && !event.enabled) {
@@ -138,12 +154,24 @@ public final strictfp class AimAssistModule extends EvidenceModule {
    }
 
    @Override
+   public void onClientTickStart(ClientContext context) {
+      this.recentAttackTicks.getAndUpdate(ticks -> Math.max(0, ticks - 1));
+   }
+
+   @Override
+   protected strictfp void onEnable(ClientContext context) {
+      this.recentAttackTicks.set(0);
+   }
+
+   @Override
    protected strictfp void onDisable(ClientContext context) {
+      this.recentAttackTicks.set(0);
       this.clearTarget();
    }
 
    @Override
    public strictfp void onWorldUnload(ClientContext context) {
+      this.recentAttackTicks.set(0);
       this.clearTarget();
       this.silent = false;
       this.graceTicks = 0;
@@ -264,10 +292,10 @@ public final strictfp class AimAssistModule extends EvidenceModule {
       } else if (this.flag("require_sprint") && this.choice("mode") != 3 && !context.player().isSprinting()) {
          this.targetActive = false;
       } else {
-         int keyCode = context.minecraft().gameSettings.keyBindAttack.getKeyCode();
-         boolean attack = Mouse.isButtonDown(keyCode == -99 ? 1 : 0);
+         KeyBinding attackKey = context.minecraft().gameSettings.keyBindAttack;
+         boolean attack = KeyState.physical(attackKey) || attackKey.isKeyDown();
          if (this.flag("require_mouse_pressed")) {
-            if (!attack) {
+            if (!attack && this.recentAttackTicks.get() == 0) {
                this.graceTicks = (this.random.chance(0.5F) ? 1 : 0) + 1;
                this.clearTarget();
                return;

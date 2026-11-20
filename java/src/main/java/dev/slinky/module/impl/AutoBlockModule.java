@@ -11,6 +11,7 @@ import dev.slinky.module.EvidenceModule;
 import dev.slinky.module.Module;
 import dev.slinky.module.ModuleCategory;
 import dev.slinky.module.ModuleManager;
+import dev.slinky.setting.BooleanSetting;
 import java.lang.reflect.Field;
 import java.util.concurrent.atomic.AtomicInteger;
 import net.minecraft.client.settings.KeyBinding;
@@ -48,6 +49,7 @@ public final class AutoBlockModule extends EvidenceModule {
    public AutoBlockModule(ModuleManager modules) {
       super("autoblock", "Auto Block", ModuleCategory.COMBAT);
       this.modules = modules;
+      this.add(new BooleanSetting("require_physical_left_mouse", "Require Physical LMB", false));
    }
 
    private static boolean holdingSword(ClientContext c) {
@@ -84,6 +86,15 @@ public final class AutoBlockModule extends EvidenceModule {
 
       float range = this.number("range");
       return GameHooks.targetDistanceSquared() < (double)(range * range);
+   }
+
+   private boolean attackInputActive(ClientContext c, boolean recentAttack) {
+      if (Mouse.isButtonDown(0)) {
+         return true;
+      }
+      return !this.flag("require_physical_left_mouse")
+         && (c.minecraft().gameSettings.keyBindAttack.isKeyDown()
+            || recentAttack || this.recentAttackTicks.get() > 0);
    }
 
    private boolean timerRangeBlocksUse() {
@@ -245,9 +256,8 @@ public final class AutoBlockModule extends EvidenceModule {
 
       if (!sword) {
          invalid = this.overrideKey;
-      } else if ((this.flag("require_left_mouse_pressed") && !Mouse.isButtonDown(0)
-         && !c.minecraft().gameSettings.keyBindAttack.isKeyDown()
-         && !recentAttack && this.recentAttackTicks.get() == 0) || this.timerRangeBlocksUse()) {
+      } else if ((this.flag("require_left_mouse_pressed") && !this.attackInputActive(c, recentAttack))
+         || this.timerRangeBlocksUse()) {
          invalid = true;
       } else {
          this.suppressUse = this.flag("require_right_mouse_pressed");
