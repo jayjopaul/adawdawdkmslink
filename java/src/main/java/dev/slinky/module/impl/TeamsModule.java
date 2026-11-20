@@ -9,6 +9,7 @@ import net.minecraft.client.network.NetworkPlayerInfo;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.scoreboard.Team;
+import net.minecraft.scoreboard.ScorePlayerTeam;
 import net.minecraft.util.ChatComponentText;
 import net.minecraft.util.IChatComponent;
 
@@ -109,16 +110,75 @@ public final class TeamsModule extends EvidenceModule {
       this.refresh(context);
    }
 
+   private static char formattedColor(String text) {
+      if (text == null) {
+         return 0;
+      }
+      char color = prefixColor(text);
+      return color == 'r' ? 0 : color;
+   }
+
+   private static char playerColor(ClientContext context, EntityPlayer player) {
+      NetworkPlayerInfo info = context.minecraft().getNetHandler().getPlayerInfo(player.getUniqueID());
+
+      if (info != null) {
+         IChatComponent display = info.getDisplayName();
+         if (display != null) {
+            char color = formattedColor(display.getFormattedText());
+            if (color != 0) {
+               return color;
+            }
+         }
+
+         ScorePlayerTeam team = info.getPlayerTeam();
+         if (team != null) {
+            String profileName = info.getGameProfile() == null ? player.getName() : info.getGameProfile().getName();
+            char color = formattedColor(ScorePlayerTeam.formatPlayerName(team, profileName));
+            if (color != 0) {
+               return color;
+            }
+
+            color = formattedColor(team.getColorPrefix() + profileName + team.getColorSuffix());
+            if (color != 0) {
+               return color;
+            }
+         }
+      }
+
+      IChatComponent display = player.getDisplayName();
+      if (display != null) {
+         char color = formattedColor(display.getFormattedText());
+         if (color != 0) {
+            return color;
+         }
+      }
+
+      return formattedColor(player.getName());
+   }
+
    public boolean isTeammate(ClientContext context, EntityPlayer player) {
       if (!this.isEnabled() || context == null || !context.ready() || player == null || player == context.player()) {
          return false;
       }
 
-      if (context.player().isOnSameTeam(player)) {
+      EntityPlayer self = context.player();
+
+      // 1) Vanilla entity-level team relationship.
+      if (self.isOnSameTeam(player)) {
          return true;
       }
 
-      NetworkPlayerInfo selfInfo = context.minecraft().getNetHandler().getPlayerInfo(context.player().getUniqueID());
+      // 2) World scoreboard membership by player name.
+      ScorePlayerTeam selfScoreTeam = context.world().getScoreboard().getPlayersTeam(self.getName());
+      ScorePlayerTeam otherScoreTeam = context.world().getScoreboard().getPlayersTeam(player.getName());
+      if (selfScoreTeam != null && otherScoreTeam != null
+         && (selfScoreTeam == otherScoreTeam
+            || selfScoreTeam.getRegisteredName().equals(otherScoreTeam.getRegisteredName()))) {
+         return true;
+      }
+
+      // 3) Tab-list team relationship.
+      NetworkPlayerInfo selfInfo = context.minecraft().getNetHandler().getPlayerInfo(self.getUniqueID());
       NetworkPlayerInfo playerInfo = context.minecraft().getNetHandler().getPlayerInfo(player.getUniqueID());
       if (selfInfo != null && playerInfo != null) {
          Team selfTeam = selfInfo.getPlayerTeam();
@@ -131,26 +191,22 @@ public final class TeamsModule extends EvidenceModule {
          }
       }
 
-      char owner = entityColor(context.player());
-      if (selfInfo != null) {
-         if (selfInfo.getPlayerTeam() != null) {
-            owner = prefixColor(selfInfo.getPlayerTeam().getColorPrefix());
-            if (owner == 0) {
-               owner = 'r';
-            }
-         } else if (selfInfo.getDisplayName() instanceof ChatComponentText) {
-            owner = trailingColor(((ChatComponentText)selfInfo.getDisplayName()).getChatComponentText_TextValue());
+      // 4) BedWars-style formatted-name color fallback.
+      if (this.flag("match_self_color")) {
+         char selfColor = playerColor(context, self);
+         char otherColor = playerColor(context, player);
+         if (selfColor != 0 && otherColor != 0 && selfColor == otherColor) {
+            return true;
+         }
+
+         int low = otherColor & 255;
+         int index = ((byte)low >= 97 ? 169 : 208) + low & 0xFF;
+         if (otherColor != 0 && index < COLORS.length && this.names("team_colors").contains(COLORS[index])) {
+            return true;
          }
       }
 
-      char code = entityColor(player);
-      boolean member = this.flag("match_self_color") && code == owner;
-      int low = code & 255;
-      int index = ((byte)low >= 97 ? 169 : 208) + low & 0xFF;
-      if (!member && index < COLORS.length) {
-         member = this.names("team_colors").contains(COLORS[index]);
-      }
-      return member;
+      return false;
    }
 
    public void refresh(ClientContext context) {
