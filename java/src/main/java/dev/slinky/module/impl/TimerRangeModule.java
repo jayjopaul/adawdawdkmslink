@@ -50,6 +50,10 @@ public final strictfp class TimerRangeModule extends EvidenceModule {
       return this.isEnabled() && (this.remaining > 0 || this.frozen);
    }
 
+   public strictfp synchronized boolean blocksUse() {
+      return this.isEnabled() && (this.remaining > 0 || this.frozen);
+   }
+
    private strictfp boolean sword(ClientContext c) {
       ItemStack stack = c.player() == null ? null : c.player().getHeldItem();
       if (stack == null) {
