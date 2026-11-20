@@ -7,6 +7,7 @@ import dev.slinky.client.rotation.RotationMath;
 import dev.slinky.module.Module;
 import dev.slinky.module.ModuleManager;
 import dev.slinky.module.impl.AimAssistModule;
+import dev.slinky.module.impl.TeamsModule;
 import net.minecraft.client.entity.EntityOtherPlayerMP;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.player.EntityPlayer;
@@ -27,6 +28,14 @@ public final strictfp class TargetCombatStatus {
 
    public strictfp double distanceSquared() {
       return this.distanceSquared;
+   }
+
+   private static boolean hostile(ClientContext c, ModuleManager modules, EntityPlayer player) {
+      Module teams = modules.find("teams");
+      if (teams instanceof TeamsModule && teams.isEnabled() && ((TeamsModule)teams).isTeammate(c, player)) {
+         return false;
+      }
+      return RelationshipService.hostile(player);
    }
 
    public strictfp void select(ClientContext c, ModuleManager modules) {
