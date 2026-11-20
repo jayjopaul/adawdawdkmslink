@@ -103,12 +103,18 @@ public final strictfp class AimAssistModule extends EvidenceModule {
 
    @Override
    public strictfp boolean listens(int type) {
-      return type == 1 || type == 13 || type == 18;
+      return type == 1 || type == 5 || type == 13 || type == 18;
    }
 
    @Override
    public strictfp void onEvent(ClientContext context, SemanticEvent event) {
-      if (event.type == 13) {
+      if (event.type == 5) {
+         // OneClient's toggle callback clears only the active target; it
+         // deliberately leaves the secondary/silent rotation to settle.
+         if (event.module == this && !event.enabled) {
+            this.clearTarget();
+         }
+      } else if (event.type == 13) {
          if (this.silent) {
             event.active = true;
             if (this.flag("silent_move_correct")) {
