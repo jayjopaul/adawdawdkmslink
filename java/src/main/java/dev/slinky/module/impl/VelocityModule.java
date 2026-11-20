@@ -102,12 +102,15 @@ public final strictfp class VelocityModule extends EvidenceModule {
                   }
                }
             }
-         } else if (e.type == 17) {
+         } else if (e.type == 18) {
+            // OneClient UPDATE_POST: capture the velocity that can be restored
+            // by Ignore mode on the next TICK.
             this.storedX = c.player().motionX;
             this.storedY = c.player().motionY;
             this.storedZ = c.player().motionZ;
             this.restoreAvailable = 1;
          } else if (e.type == 0) {
+            // OneClient TICK: restore velocity for Ignore mode.
             if (this.choice("mode") == 3 && c.inputReady()) {
                if ((this.skipRestore & 1) != 0) {
                   this.skipRestore = 0;
@@ -121,7 +124,9 @@ public final strictfp class VelocityModule extends EvidenceModule {
                   this.restoreAvailable = 0;
                }
             }
-         } else {
+         } else if (e.type == 17) {
+            // OneClient UPDATE_ROTATION: apply Jump/Reduce logic before the
+            // vanilla player update completes.
             this.attackReduced = 0;
             int mode = this.choice("mode");
             if (mode != 2 && c.inputReady()) {
