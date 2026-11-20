@@ -33,7 +33,7 @@ public final class GameHooks {
    private static long controllerHookHeartbeat;
    private static long displayHookHeartbeat;
    private static boolean forgeWorldFallback;
-   private static final long HOOK_STALE_NANOS = 150000000L;
+   private static final long HOOK_STALE_NANOS = 1000000000L;
 
    private GameHooks() {
    }
