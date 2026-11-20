@@ -181,10 +181,10 @@ public final strictfp class VelocityModule extends EvidenceModule {
 
    @Override
    protected strictfp synchronized void onDisable(ClientContext c) {
-      this.restoreAvailable = false;
-      if (this.jumpOverridden) {
+      this.restoreAvailable = 0;
+      if (this.jumpOverridden == 1) {
          KeyState.restore(c.minecraft().gameSettings.keyBindJump);
-         this.jumpOverridden = false;
+         this.jumpOverridden = 0;
       }
    }
 
@@ -194,7 +194,7 @@ public final strictfp class VelocityModule extends EvidenceModule {
    }
 
    private strictfp void reset(ClientContext c) {
-      if (this.jumpOverridden) {
+      if (this.jumpOverridden == 1) {
          KeyState.restore(c.minecraft().gameSettings.keyBindJump);
       }
 
