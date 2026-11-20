@@ -34,6 +34,9 @@ public final class ClientEventBridge {
    private boolean mousePending;
    private Channel attachedChannel;
    private static Field channelField;
+   private static volatile long clientTickHeartbeat;
+   private static volatile long renderTickHeartbeat;
+   private static final long HOOK_STALE_NANOS = 150000000L;
 
    public ClientEventBridge(ModuleManager modules, KeyBinding openGui, CommandBase command) {
       this.modules = modules;
@@ -58,6 +61,17 @@ public final class ClientEventBridge {
    }
 
    public static void clientTick(boolean start) {
+      clientTickHeartbeat = System.nanoTime();
+      dispatchClientTick(start);
+   }
+
+   public static void forgeClientTick(boolean start) {
+      if (System.nanoTime() - clientTickHeartbeat > HOOK_STALE_NANOS) {
+         dispatchClientTick(start);
+      }
+   }
+
+   private static void dispatchClientTick(boolean start) {
       ClientEventBridge bridge = instance;
       if (bridge != null) {
          if (start) {
@@ -69,12 +83,25 @@ public final class ClientEventBridge {
    }
 
    public static void renderTick(boolean start) {
+      renderTickHeartbeat = System.nanoTime();
+      dispatchRenderTick(start, false);
+   }
+
+   public static void forgeRenderTick(boolean start) {
+      if (System.nanoTime() - renderTickHeartbeat > HOOK_STALE_NANOS) {
+         dispatchRenderTick(start, true);
+      }
+   }
+
+   private static void dispatchRenderTick(boolean start, boolean forgeFallback) {
       ClientEventBridge bridge = instance;
       if (bridge != null) {
          bridge.modules.renderTick(start);
          if (!start) {
             GameHooks.afterFrameRender();
-            GameHooks.beforeDisplay();
+            if (forgeFallback) {
+               GameHooks.forgeBeforeDisplay();
+            }
          }
       }
    }
