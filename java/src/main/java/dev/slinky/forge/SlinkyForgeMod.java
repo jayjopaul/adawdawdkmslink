@@ -46,7 +46,7 @@ public final class SlinkyForgeMod {
       if (start) {
          GameHooks.forgeControllerTick();
       }
-      ClientEventBridge.clientTick(start);
+      ClientEventBridge.forgeClientTick(start);
    }
 
    @SubscribeEvent
@@ -55,7 +55,7 @@ public final class SlinkyForgeMod {
       if (start) {
          GameHooks.forgeFrameStart(event.renderTickTime);
       }
-      ClientEventBridge.renderTick(start);
+      ClientEventBridge.forgeRenderTick(start);
    }
 
    @SubscribeEvent
