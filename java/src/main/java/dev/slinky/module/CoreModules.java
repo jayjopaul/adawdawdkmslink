@@ -107,7 +107,7 @@ public final class CoreModules {
       implemented.add(new GhostHandModule());
       implemented.add(new NoItemReleaseModule());
       implemented.add(new PingFixModule());
-      implemented.add(new AimAssistModule(weapons));
+      implemented.add(new AimAssistModule(manager, weapons));
       implemented.add(new FreeLookModule());
       implemented.add(new StrafeModule(weapons));
       implemented.add(new InstantStopModule());
