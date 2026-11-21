@@ -627,6 +627,12 @@
         "source": "MetadataCatalog.json: Auto Block.require_left_mouse_pressed.saved_observation",
         "factory_default_proved": false
       },
+      "require_physical_left_mouse": {
+        "value": false,
+        "basis": "compatibility_default",
+        "source": "AutoBlockModule",
+        "factory_default_proved": false
+      },
       "require_right_mouse_pressed": {
         "value": false,
         "basis": "imported_saved_configuration_observation",
