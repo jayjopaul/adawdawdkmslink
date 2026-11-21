@@ -44,6 +44,7 @@ public final class AutoBlockModule extends EvidenceModule {
    private int swapGraceTicks;
    private boolean blocking;
    private boolean overrideKey;
+   private boolean releaseDuringGap;
    private int animationRemaining = 72000;
 
    public AutoBlockModule(ModuleManager modules) {
@@ -134,6 +135,10 @@ public final class AutoBlockModule extends EvidenceModule {
       // world's entity update. Client tick END is the closest stable Forge
       // equivalent and, importantly, runs once per game tick rather than once
       // per rendered frame.
+      if (this.releaseDuringGap && focused(c) && Mouse.isButtonDown(1)
+         && (!this.flag("require_left_mouse_pressed") || this.attackInputActive(c, false))) {
+         this.releaseSwordUse(c);
+      }
       this.applyAutoBlockAnimation(c);
    }
 
@@ -198,7 +203,14 @@ public final class AutoBlockModule extends EvidenceModule {
       this.overrideKey = false;
    }
 
+   private void releaseSwordUse(ClientContext c) {
+      if (holdingSword(c) && c.player().isBlocking()) {
+         c.minecraft().playerController.onStoppedUsingItem(c.player());
+      }
+   }
+
    private void updateAutoBlock(ClientContext c) {
+      this.releaseDuringGap = false;
       boolean recentAttack = this.recentAttackTicks.getAndUpdate(ticks -> Math.max(0, ticks - 1)) > 0;
       this.fakeAnimation = false;
 
@@ -358,11 +370,16 @@ public final class AutoBlockModule extends EvidenceModule {
          }
 
          this.blocking = false;
-         if (sword && c.player().isBlocking()) {
-            // Release the sword before other tick listeners check item use for attacks.
-            c.minecraft().playerController.onStoppedUsingItem(c.player());
-         }
+         this.releaseDuringGap = sword && this.suppressUse && keyOwnedThisTick;
+         this.releaseSwordUse(c);
          return;
+      }
+
+      // Held physical RMB can restart sword use after the initial release.
+      // Keep it released for the remaining cooldown ticks while AutoBlock owns use.
+      if (keyOwnedThisTick && this.suppressUse && this.cooldown > 0) {
+         this.releaseDuringGap = true;
+         this.releaseSwordUse(c);
       }
 
       if (!keyOwnedThisTick || this.cooldown != 0 || !this.targetInBlockRange()) {
@@ -417,6 +434,7 @@ public final class AutoBlockModule extends EvidenceModule {
       this.swapGraceTicks = 0;
       this.blocking = false;
       this.overrideKey = false;
+      this.releaseDuringGap = false;
       this.animationRemaining = 72000;
    }
 }
