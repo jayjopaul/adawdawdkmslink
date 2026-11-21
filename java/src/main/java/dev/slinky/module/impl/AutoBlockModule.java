@@ -344,8 +344,13 @@ public final class AutoBlockModule extends EvidenceModule {
          }
 
          if (sword) {
-            KeyState.set(useKey(c), false);
+            KeyBinding key = useKey(c);
+            KeyState.set(key, false);
             this.overrideKey = true;
+            if (keyOwnedThisTick) {
+               // Undo the synthetic press queued above before the hold ended.
+               key.isPressed();
+            }
          }
 
          if (this.random.chance(this.number("lag_chance"))) {
@@ -353,6 +358,10 @@ public final class AutoBlockModule extends EvidenceModule {
          }
 
          this.blocking = false;
+         if (sword && c.player().isBlocking()) {
+            // Release the sword before other tick listeners check item use for attacks.
+            c.minecraft().playerController.onStoppedUsingItem(c.player());
+         }
          return;
       }
 
