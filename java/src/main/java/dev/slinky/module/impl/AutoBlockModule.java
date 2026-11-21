@@ -40,6 +40,7 @@ public final class AutoBlockModule extends EvidenceModule {
    private boolean suppressUse;
    private final AtomicInteger lag = new AtomicInteger();
    private final AtomicInteger recentAttackTicks = new AtomicInteger();
+   private final AtomicInteger attackPacketTicks = new AtomicInteger();
    private int lastBlockableSlot = -1;
    private int swapGraceTicks;
    private boolean blocking;
@@ -149,6 +150,7 @@ public final class AutoBlockModule extends EvidenceModule {
          if (e.packetAgeMillis == 0L && e.packet instanceof C02PacketUseEntity
             && ((C02PacketUseEntity)e.packet).getAction() == C02PacketUseEntity.Action.ATTACK) {
             this.recentAttackTicks.set(RECENT_ATTACK_TICKS);
+            this.attackPacketTicks.set(RECENT_ATTACK_TICKS);
          }
          if (this.lag.get() != 0) {
             e.dispatchMode = 1;
@@ -212,6 +214,7 @@ public final class AutoBlockModule extends EvidenceModule {
    private void updateAutoBlock(ClientContext c) {
       this.releaseDuringGap = false;
       boolean recentAttack = this.recentAttackTicks.getAndUpdate(ticks -> Math.max(0, ticks - 1)) > 0;
+      boolean recentAttackPacket = this.attackPacketTicks.getAndUpdate(ticks -> Math.max(0, ticks - 1)) > 0;
       this.fakeAnimation = false;
 
       if (this.wroteAnimation) {
@@ -370,19 +373,22 @@ public final class AutoBlockModule extends EvidenceModule {
          }
 
          this.blocking = false;
+         this.attackPacketTicks.set(0);
          this.releaseDuringGap = sword && this.suppressUse && keyOwnedThisTick;
          this.releaseSwordUse(c);
          return;
       }
 
-      // Held physical RMB can restart sword use after the initial release.
-      // Keep it released for the remaining cooldown ticks while AutoBlock owns use.
-      if (keyOwnedThisTick && this.suppressUse && this.cooldown > 0) {
+      // When both inputs are required, let the clicker send an attack
+      // before raising the sword. Held RMB alone can otherwise starve it.
+      boolean waitingForAttack = this.suppressUse && this.flag("require_left_mouse_pressed")
+         && !recentAttackPacket && this.attackPacketTicks.get() == 0;
+      if (keyOwnedThisTick && this.suppressUse && (this.cooldown > 0 || waitingForAttack)) {
          this.releaseDuringGap = true;
          this.releaseSwordUse(c);
       }
 
-      if (!keyOwnedThisTick || this.cooldown != 0 || !this.targetInBlockRange()) {
+      if (!keyOwnedThisTick || this.cooldown != 0 || waitingForAttack || !this.targetInBlockRange()) {
          return;
       }
 
@@ -430,6 +436,7 @@ public final class AutoBlockModule extends EvidenceModule {
       this.suppressUse = false;
       this.lag.set(0);
       this.recentAttackTicks.set(0);
+      this.attackPacketTicks.set(0);
       this.lastBlockableSlot = -1;
       this.swapGraceTicks = 0;
       this.blocking = false;
